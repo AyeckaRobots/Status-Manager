@@ -1,9 +1,12 @@
-from time import sleep
+import time
 
 import json
 import requests
 import logging
 import keyboard
+from datetime import datetime
+
+import threading
 
 
 def get_auth(username, password, ip):
@@ -35,19 +38,22 @@ def read_esno():
     print(data)
 
 
-def log_stats(bit_rate, current_bit_rate, current_esno, frame_counter, current_frame_counter,
-              missed_counter, current_missed_counter):
-    if bit_rate != current_bit_rate:
-        logging.info(f"Got new bit rate of: {bit_rate}")
+def log_stats(info, current_bit_rate, current_esno, current_frame_counter):
+    global current_missed_counter
+    
+    if info["bit_rate"] != current_bit_rate:
+        logging.info(f"Got new bit rate of: {info['bit_rate']}")
     # if 9 > current_esno > 11:
     #     logging.error(f"Esno value out of range: {current_esno}")
-    if current_frame_counter > frame_counter:
+    if current_frame_counter > info["frame_counter"]:
         logging.info("Got new frames")
-    if current_missed_counter > missed_counter:
-        logging.debug(f"Missed frames! amount: {current_missed_counter - missed_counter}, esno: {current_esno}")
+    if current_missed_counter - info["offset"] > info["missed_counter"]:
+        logging.warning(f"Missed frames! amount: {current_missed_counter - info['missed_counter'] - info['offset']}, esno: {current_esno}")
 
 
 def start_logging(ip):
+    global current_missed_counter
+    
     username = "admin"
     password = "admin"
 
@@ -57,13 +63,13 @@ def start_logging(ip):
     if token == -1:
         print("No connection established. exiting program.")
         return
-
-    frame_counter = 0
-    missed_counter = 0
-    bit_rate = 0
+    
+    info = {"frame_counter":0 , "missed_counter":0 , "bit_rate":0 , "esno":0, "offset":0}
+    
+    threading.Thread(target=inputs, args=[info]).start()
 
     while True:
-        print("sending req (long press 'i' to see response)")
+        print("sending req (press 'i' for info, 'r' to reset missed)")
         agg = get_advanced_stats(token, ip)
 
         if agg == -1:
@@ -80,18 +86,28 @@ def start_logging(ip):
             
         current_esno = int(current_esno) / 10
 
-        log_stats(bit_rate, current_bit_rate, current_esno, frame_counter, current_frame_counter,
-                  missed_counter, current_missed_counter)
+        log_stats(info, current_bit_rate, current_esno, current_frame_counter)
+        
+        info["frame_counter"] = current_frame_counter
+        info["missed_counter"] = current_missed_counter - info["offset"]
+        info["bit_rate"] = current_bit_rate
+        info["esno"] = current_esno
+        
+        time.sleep(10)
 
-        frame_counter = current_frame_counter
-        missed_counter = current_missed_counter
-        bit_rate = current_bit_rate
-
-        sleep(10)
+            
+def inputs(info: dict):
+    
+    while True:
         if keyboard.is_pressed('i'):
-            print("-----------------------------------------------\n Card Activity Report")
-            print(f"Status:\nCurrent frame: {frame_counter}\nAmount missed: {missed_counter}\nCurrent esno {current_esno}")
+            print(f"-----------------------------------------------\nCard Activity Report {datetime.today().strftime('%H:%M:%S')}")
+            print(f"Status:\nCurrent frame: {info['frame_counter']}\nAmount missed: {info['missed_counter']}\nCurrent esno {info['esno']}")
             print("-----------------------------------------------")
+            time.sleep(1)
+        if keyboard.is_pressed('r'):
+            info.update({"missed_counter":0})
+            info.update({"offset": current_missed_counter})
+            time.sleep(1)
 
 def main():
     ipaddress = input("Enter the ip of the device. (just press enter for 192.168.10.200)")
@@ -101,6 +117,8 @@ def main():
 
 
 if __name__ == "__main__":
+    
+    current_missed_counter = 0
 
     # read_esno()
     logging.basicConfig(filename="newfile.log",
